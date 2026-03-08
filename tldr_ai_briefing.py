@@ -478,6 +478,32 @@ def write_outputs(output_root: Path, summary_text: str, date_slug: str) -> tuple
     return txt_path, md_path
 
 
+def should_skip_for_weekend_stale(
+    newsletter_date_slug: str,
+    skip_weekend_stale: bool,
+) -> bool:
+    if not skip_weekend_stale:
+        return False
+
+    now_la = datetime.now(LA_TZ)
+    if now_la.weekday() < 5:
+        return False
+
+    try:
+        newsletter_date = datetime.strptime(newsletter_date_slug, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+
+    if newsletter_date < now_la.date():
+        logging.info(
+            "Weekend run detected and latest newsletter is from %s; skipping regeneration.",
+            newsletter_date_slug,
+        )
+        return True
+
+    return False
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -501,6 +527,7 @@ def main() -> None:
     openrouter_app_name = os.getenv("OPENROUTER_APP_NAME", "").strip() or None
     tts_voice = optional_env("TTS_VOICE", "en-US-JennyNeural")
     tts_rate = optional_env("TTS_RATE", "+0%")
+    skip_weekend_stale = optional_env("SKIP_WEEKEND_STALE", "true").lower() != "false"
 
     output_root = Path(os.getenv("OUTPUT_DIR", "output"))
 
@@ -513,6 +540,8 @@ def main() -> None:
         lookback_days=lookback_days,
     )
     newsletter_date_slug = extract_newsletter_date_slug(message)
+    if should_skip_for_weekend_stale(newsletter_date_slug, skip_weekend_stale):
+        return
 
     html_body, text_body = get_message_bodies(message)
     links = extract_links(html_body, text_body)

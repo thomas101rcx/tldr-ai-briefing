@@ -3,9 +3,9 @@ name: TLDR AI Briefing
 on:
   workflow_dispatch:
   schedule:
-    # 7:00 AM PST (UTC-8). If you want 7:00 AM local Pacific time year-round,
-    # add a second cron for PDT or handle DST in-script.
-    - cron: "0 15 * * *"
+    # Weekdays only at 15:00 UTC.
+    # This is 7:00 AM PST in standard time and 8:00 AM PDT in daylight time.
+    - cron: "0 15 * * 1-5"
 
 jobs:
   build-briefing:

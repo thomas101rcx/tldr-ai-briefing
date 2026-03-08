@@ -59,7 +59,9 @@ Do not use your regular Gmail password.
 
 ## Notes
 
-- GitHub Actions cron is in UTC. The workflow is set to `15:00 UTC` (7:00 AM PST).
+- GitHub Actions cron is in UTC and runs Monday-Friday at `15:00 UTC`.
+- `15:00 UTC` maps to `7:00 AM PST` during standard time and `8:00 AM PDT` during daylight time.
 - Current default free model is `arcee-ai/trinity-large-preview:free` on OpenRouter.
 - If newsletter formatting changes, tune `TLDR_FROM_CONTAINS` and `TLDR_SUBJECT_CONTAINS`.
 - Some sites may block scraping or require JavaScript, which can reduce source coverage.
+- Weekend safety: if run manually on Saturday/Sunday and latest newsletter is from an earlier day, script skips regeneration by default (`SKIP_WEEKEND_STALE=true`).
