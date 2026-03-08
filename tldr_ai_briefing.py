@@ -151,21 +151,19 @@ def fetch_tldr_message(
     subject_contains: str,
     lookback_days: int,
 ) -> email.message.Message:
-    with imaplib.IMAP4_SSL(IMAP_HOST) as mailbox:
-        mailbox.login(gmail_address, gmail_app_password)
-        mailbox.select("INBOX")
-
-        since = (datetime.now() - timedelta(days=lookback_days)).strftime("%d-%b-%Y")
+    def find_in_selected_mailbox(
+        mailbox: imaplib.IMAP4_SSL,
+        since: str,
+        from_contains_l: str,
+        subject_contains_l: str,
+    ) -> tuple[email.message.Message | None, email.message.Message | None, list[str]]:
         status, data = mailbox.search(None, f'(SINCE "{since}")')
-        if status != "OK":
-            raise RuntimeError("Unable to query Gmail inbox")
+        if status != "OK" or not data or not data[0]:
+            return None, None, []
 
         message_ids = data[0].split()
-        if not message_ids:
-            raise RuntimeError("No recent emails found in Gmail inbox")
-
-        from_contains_l = from_contains.lower()
-        subject_contains_l = subject_contains.lower()
+        sender_fallback: email.message.Message | None = None
+        recent_subjects: list[str] = []
 
         for msg_id in reversed(message_ids):
             status, payload = mailbox.fetch(msg_id, "(RFC822)")
@@ -177,13 +175,60 @@ def fetch_tldr_message(
 
             sender = decode_mime_header(message.get("From", "")).lower()
             subject = decode_mime_header(message.get("Subject", "")).lower()
+            recent_subjects.append(subject[:120])
+            if len(recent_subjects) > 8:
+                recent_subjects.pop(0)
 
-            if from_contains_l in sender and subject_contains_l in subject:
-                return message
+            if from_contains_l in sender:
+                if sender_fallback is None:
+                    sender_fallback = message
+                if not subject_contains_l or subject_contains_l in subject:
+                    return message, sender_fallback, recent_subjects
 
+        return None, sender_fallback, recent_subjects
+
+    with imaplib.IMAP4_SSL(IMAP_HOST) as mailbox:
+        mailbox.login(gmail_address, gmail_app_password)
+
+        since = (datetime.now() - timedelta(days=lookback_days)).strftime("%d-%b-%Y")
+        from_contains_l = from_contains.lower()
+        subject_contains_l = subject_contains.lower()
+
+        folders = ["INBOX", "[Gmail]/All Mail"]
+        recent_subjects: list[str] = []
+        sender_fallback: email.message.Message | None = None
+
+        for folder in folders:
+            status, _ = mailbox.select(folder)
+            if status != "OK":
+                continue
+
+            exact_message, folder_fallback, folder_subjects = find_in_selected_mailbox(
+                mailbox=mailbox,
+                since=since,
+                from_contains_l=from_contains_l,
+                subject_contains_l=subject_contains_l,
+            )
+
+            recent_subjects.extend(folder_subjects)
+            if folder_fallback and sender_fallback is None:
+                sender_fallback = folder_fallback
+            if exact_message:
+                return exact_message
+
+        if sender_fallback:
+            logging.warning(
+                "No exact TLDR subject match for '%s'; falling back to latest sender match '%s'.",
+                subject_contains,
+                from_contains,
+            )
+            return sender_fallback
+
+        subject_preview = ", ".join(recent_subjects[-5:]) if recent_subjects else "none"
         raise RuntimeError(
             "Could not find a matching TLDR AI email. "
-            "Adjust TLDR_FROM_CONTAINS / TLDR_SUBJECT_CONTAINS if needed."
+            f"Adjust TLDR_FROM_CONTAINS / TLDR_SUBJECT_CONTAINS if needed. "
+            f"Recent subjects seen: {subject_preview}"
         )
 
 
