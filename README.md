@@ -5,8 +5,9 @@ This automation:
 2. Finds the latest TLDR AI newsletter email.
 3. Opens links found in the email (including PDF/paper links).
 4. Extracts readable content from each source.
-5. Uses OpenAI to create a spoken daily summary.
-6. Produces `briefing.txt`, `briefing.md`, and `briefing.mp3`.
+5. Uses a free OpenRouter model to create a spoken daily summary script.
+6. Uses free `edge-tts` to generate MP3 audio.
+7. Produces `briefing.txt`, `briefing.md`, and `briefing.mp3`.
 
 ## Run locally
 
@@ -17,14 +18,17 @@ pip install -r requirements.txt
 
 export GMAIL_ADDRESS="you@gmail.com"
 export GMAIL_APP_PASSWORD="your-google-app-password"
-export OPENAI_API_KEY="sk-..."
+export OPENROUTER_API_KEY="your-openrouter-key"
 
 # Optional tuning
+export OPENROUTER_MODEL="arcee-ai/trinity-large-preview:free"
 export TLDR_FROM_CONTAINS="tldr"
 export TLDR_SUBJECT_CONTAINS="tldr ai"
 export MAX_LINKS="80"
 export MAX_CHARS_PER_SOURCE="1200"
 export MAX_TOTAL_CHARS="90000"
+export TTS_VOICE="en-US-JennyNeural"
+export TTS_RATE="+0%"
 
 python tldr_ai_briefing.py
 ```
@@ -36,9 +40,10 @@ Output lands in `output/YYYY-MM-DD/`.
 Add these repository secrets:
 - `GMAIL_ADDRESS`
 - `GMAIL_APP_PASSWORD`
-- `OPENAI_API_KEY`
+- `OPENROUTER_API_KEY`
 
 Optional secrets (defaults are used if blank):
+- `OPENROUTER_MODEL` (default: `arcee-ai/trinity-large-preview:free`)
 - `TLDR_FROM_CONTAINS` (default: `tldr`)
 - `TLDR_SUBJECT_CONTAINS` (default: `tldr ai`)
 
@@ -55,5 +60,6 @@ Do not use your regular Gmail password.
 ## Notes
 
 - GitHub Actions cron is in UTC. The workflow is set to `15:00 UTC` (7:00 AM PST).
+- Current default free model is `arcee-ai/trinity-large-preview:free` on OpenRouter.
 - If newsletter formatting changes, tune `TLDR_FROM_CONTAINS` and `TLDR_SUBJECT_CONTAINS`.
 - Some sites may block scraping or require JavaScript, which can reduce source coverage.

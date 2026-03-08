@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import email
 import imaplib
 import logging
@@ -20,6 +21,7 @@ from zoneinfo import ZoneInfo
 import requests
 import trafilatura
 from bs4 import BeautifulSoup
+import edge_tts
 from pypdf import PdfReader
 
 IMAP_HOST = "imap.gmail.com"
@@ -237,13 +239,24 @@ def fetch_url_text(url: str, timeout_seconds: int, max_chars_per_source: int) ->
     return Article(url=url, title=title, text=text[:max_chars_per_source])
 
 
-def openai_request_json(api_key: str, payload: dict) -> dict:
+def openrouter_request_json(
+    api_key: str,
+    payload: dict,
+    app_url: str | None = None,
+    app_name: str | None = None,
+) -> dict:
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if app_url:
+        headers["HTTP-Referer"] = app_url
+    if app_name:
+        headers["X-Title"] = app_name
+
     response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers=headers,
         json=payload,
         timeout=180,
     )
@@ -251,19 +264,23 @@ def openai_request_json(api_key: str, payload: dict) -> dict:
     return response.json()
 
 
-def extract_output_text(response_json: dict) -> str:
-    direct = response_json.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
+def extract_choice_text(response_json: dict) -> str:
+    choices = response_json.get("choices", [])
+    if not choices:
+        return ""
 
-    chunks: list[str] = []
-    for item in response_json.get("output", []):
-        for content in item.get("content", []):
-            text = content.get("text")
-            if text:
-                chunks.append(text)
+    content = choices[0].get("message", {}).get("content", "")
+    if isinstance(content, str):
+        return content.strip()
 
-    return "\n".join(chunks).strip()
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
+                chunks.append(str(item["text"]))
+        return "\n".join(chunks).strip()
+
+    return ""
 
 
 def summarize_articles(
@@ -271,6 +288,8 @@ def summarize_articles(
     model: str,
     articles: list[Article],
     max_total_chars: int,
+    app_url: str | None = None,
+    app_name: str | None = None,
 ) -> str:
     combined_sections = []
     consumed_chars = 0
@@ -290,65 +309,53 @@ def summarize_articles(
 
     payload = {
         "model": model,
-        "input": [
+        "messages": [
             {
                 "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (
-                            "You are a concise analyst producing a spoken daily AI news briefing. "
-                            "Summarize key developments, why they matter, and practical takeaways."
-                        ),
-                    }
-                ],
+                "content": (
+                    "You are a concise analyst producing a spoken daily AI news briefing. "
+                    "Summarize key developments, why they matter, and practical takeaways."
+                ),
             },
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (
-                            "Create a 3-5 minute daily briefing script from these sources.\n"
-                            "Requirements:\n"
-                            "1) Start with a one-sentence headline summary.\n"
-                            "2) Group by themes with short section headers.\n"
-                            "3) Mention major papers/research and practical impacts.\n"
-                            "4) End with three bullet takeaways.\n"
-                            "5) Keep it plain text for text-to-speech.\n\n"
-                            f"Sources:\n{digest_input}"
-                        ),
-                    }
-                ],
+                "content": (
+                    "Create a 3-5 minute daily briefing script from these sources.\n"
+                    "Requirements:\n"
+                    "1) Start with a one-sentence headline summary.\n"
+                    "2) Group by themes with short section headers.\n"
+                    "3) Mention major papers/research and practical impacts.\n"
+                    "4) End with three bullet takeaways.\n"
+                    "5) Keep it plain text for text-to-speech.\n\n"
+                    f"Sources:\n{digest_input}"
+                ),
             },
         ],
         "temperature": 0.2,
     }
 
-    response_json = openai_request_json(api_key, payload)
-    summary = extract_output_text(response_json)
+    response_json = openrouter_request_json(
+        api_key,
+        payload,
+        app_url=app_url,
+        app_name=app_name,
+    )
+    summary = extract_choice_text(response_json)
     if not summary:
-        raise RuntimeError("OpenAI summary response was empty")
+        raise RuntimeError("OpenRouter summary response was empty")
     return summary
 
 
-def synthesize_audio(api_key: str, model: str, voice: str, text: str, output_path: Path) -> None:
-    response = requests.post(
-        "https://api.openai.com/v1/audio/speech",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "voice": voice,
-            "format": "mp3",
-            "input": text[:4000],
-        },
-        timeout=180,
-    )
-    response.raise_for_status()
-    output_path.write_bytes(response.content)
+async def _save_edge_tts(text: str, voice: str, rate: str, output_path: Path) -> None:
+    communicator = edge_tts.Communicate(text=text, voice=voice, rate=rate)
+    await communicator.save(str(output_path))
+
+
+def synthesize_audio(voice: str, rate: str, text: str, output_path: Path) -> None:
+    payload = text.strip()
+    if not payload:
+        raise RuntimeError("Cannot synthesize empty summary text")
+    asyncio.run(_save_edge_tts(payload[:12000], voice, rate, output_path))
 
 
 def write_outputs(output_root: Path, summary_text: str) -> tuple[Path, Path]:
@@ -373,7 +380,7 @@ def main() -> None:
 
     gmail_address = require_env("GMAIL_ADDRESS")
     gmail_app_password = require_env("GMAIL_APP_PASSWORD")
-    openai_api_key = require_env("OPENAI_API_KEY")
+    openrouter_api_key = require_env("OPENROUTER_API_KEY")
 
     subject_contains = optional_env("TLDR_SUBJECT_CONTAINS", "tldr ai")
     from_contains = optional_env("TLDR_FROM_CONTAINS", "tldr")
@@ -383,9 +390,14 @@ def main() -> None:
     max_chars_per_source = int(os.getenv("MAX_CHARS_PER_SOURCE", "1200"))
     max_total_chars = int(os.getenv("MAX_TOTAL_CHARS", "90000"))
 
-    text_model = os.getenv("OPENAI_TEXT_MODEL", "gpt-4.1-mini")
-    tts_model = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
-    tts_voice = os.getenv("OPENAI_TTS_VOICE", "alloy")
+    openrouter_model = optional_env(
+        "OPENROUTER_MODEL",
+        "arcee-ai/trinity-large-preview:free",
+    )
+    openrouter_app_url = os.getenv("OPENROUTER_APP_URL", "").strip() or None
+    openrouter_app_name = os.getenv("OPENROUTER_APP_NAME", "").strip() or None
+    tts_voice = optional_env("TTS_VOICE", "en-US-JennyNeural")
+    tts_rate = optional_env("TTS_RATE", "+0%")
 
     output_root = Path(os.getenv("OUTPUT_DIR", "output"))
 
@@ -416,16 +428,18 @@ def main() -> None:
 
     logging.info("Extracted readable content from %s links", len(articles))
     summary_text = summarize_articles(
-        openai_api_key,
-        text_model,
+        openrouter_api_key,
+        openrouter_model,
         articles,
         max_total_chars=max_total_chars,
+        app_url=openrouter_app_url,
+        app_name=openrouter_app_name,
     )
 
     txt_path, md_path = write_outputs(output_root, summary_text)
 
     mp3_path = txt_path.with_suffix(".mp3")
-    synthesize_audio(openai_api_key, tts_model, tts_voice, summary_text, mp3_path)
+    synthesize_audio(tts_voice, tts_rate, summary_text, mp3_path)
 
     logging.info("Summary written to %s", txt_path)
     logging.info("Markdown copy written to %s", md_path)

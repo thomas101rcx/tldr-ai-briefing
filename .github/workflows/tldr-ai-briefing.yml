@@ -14,7 +14,8 @@ jobs:
     env:
       GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
       TLDR_FROM_CONTAINS: ${{ secrets.TLDR_FROM_CONTAINS }}
       TLDR_SUBJECT_CONTAINS: ${{ secrets.TLDR_SUBJECT_CONTAINS }}
       OUTPUT_DIR: output
