@@ -1,0 +1,4 @@
+beautifulsoup4==4.13.4
+pypdf==5.4.0
+requests==2.32.3
+trafilatura==2.0.0
