@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.header import decode_header
+from email.utils import parsedate_to_datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
@@ -447,13 +448,26 @@ def synthesize_audio(voice: str, rate: str, text: str, output_path: Path) -> Non
     asyncio.run(_save_edge_tts(payload[:12000], voice, rate, output_path))
 
 
-def write_outputs(output_root: Path, summary_text: str) -> tuple[Path, Path]:
-    date_slug = datetime.now(LA_TZ).strftime("%Y-%m-%d")
+def extract_newsletter_date_slug(message: email.message.Message) -> str:
+    raw_date = message.get("Date", "")
+    if raw_date:
+        try:
+            parsed = parsedate_to_datetime(raw_date)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=LA_TZ)
+            return parsed.astimezone(LA_TZ).strftime("%Y-%m-%d")
+        except Exception:
+            logging.warning("Could not parse newsletter Date header '%s'; using current date", raw_date)
+    return datetime.now(LA_TZ).strftime("%Y-%m-%d")
+
+
+def write_outputs(output_root: Path, summary_text: str, date_slug: str) -> tuple[Path, Path]:
     output_dir = output_root / date_slug
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    txt_path = output_dir / "briefing.txt"
-    md_path = output_dir / "briefing.md"
+    filename_stem = f"tldr-ai-briefing-{date_slug}"
+    txt_path = output_dir / f"{filename_stem}.txt"
+    md_path = output_dir / f"{filename_stem}.md"
 
     txt_path.write_text(summary_text + "\n", encoding="utf-8")
     md_path.write_text(
@@ -498,6 +512,7 @@ def main() -> None:
         subject_contains=subject_contains,
         lookback_days=lookback_days,
     )
+    newsletter_date_slug = extract_newsletter_date_slug(message)
 
     html_body, text_body = get_message_bodies(message)
     links = extract_links(html_body, text_body)
@@ -525,7 +540,7 @@ def main() -> None:
         app_name=openrouter_app_name,
     )
 
-    txt_path, md_path = write_outputs(output_root, summary_text)
+    txt_path, md_path = write_outputs(output_root, summary_text, newsletter_date_slug)
 
     mp3_path = txt_path.with_suffix(".mp3")
     synthesize_audio(tts_voice, tts_rate, summary_text, mp3_path)

@@ -7,7 +7,7 @@ This automation:
 4. Extracts readable content from each source.
 5. Uses a free OpenRouter model to create a spoken daily summary script.
 6. Uses free `edge-tts` to generate MP3 audio.
-7. Produces `briefing.txt`, `briefing.md`, and `briefing.mp3`.
+7. Produces `tldr-ai-briefing-YYYY-MM-DD.txt`, `.md`, and `.mp3`.
 
 ## Run locally
 
