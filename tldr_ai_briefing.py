@@ -151,6 +151,45 @@ def fetch_tldr_message(
     subject_contains: str,
     lookback_days: int,
 ) -> email.message.Message:
+    def discover_all_mail_folders(mailbox: imaplib.IMAP4_SSL) -> list[str]:
+        status, payload = mailbox.list()
+        if status != "OK" or not payload:
+            return []
+
+        discovered: list[str] = []
+        for row in payload:
+            if not row:
+                continue
+            decoded = row.decode("utf-8", errors="replace")
+            # Common LIST shape: (<flags>) "<delimiter>" "<mailbox name>"
+            match = re.search(r"\((?P<flags>[^)]*)\)\s+\"[^\"]*\"\s+(?P<name>.+)$", decoded)
+            if not match:
+                continue
+
+            flags = match.group("flags").lower()
+            name = match.group("name").strip()
+            if name.startswith('"') and name.endswith('"'):
+                name = name[1:-1]
+
+            if "\\all" in flags or "all mail" in name.lower():
+                discovered.append(name)
+
+        return discovered
+
+    def try_select_mailbox(mailbox: imaplib.IMAP4_SSL, folder: str) -> bool:
+        candidates = [folder]
+        if not (folder.startswith('"') and folder.endswith('"')):
+            candidates.append(f'"{folder}"')
+
+        for candidate in candidates:
+            try:
+                status, _ = mailbox.select(candidate)
+            except imaplib.IMAP4.error:
+                continue
+            if status == "OK":
+                return True
+        return False
+
     def find_in_selected_mailbox(
         mailbox: imaplib.IMAP4_SSL,
         since: str,
@@ -194,13 +233,18 @@ def fetch_tldr_message(
         from_contains_l = from_contains.lower()
         subject_contains_l = subject_contains.lower()
 
-        folders = ["INBOX", "[Gmail]/All Mail"]
+        discovered_all_mail = discover_all_mail_folders(mailbox)
+        folders = ["INBOX", *discovered_all_mail, "[Gmail]/All Mail", "[Google Mail]/All Mail"]
+        seen_folders: set[str] = set()
         recent_subjects: list[str] = []
         sender_fallback: email.message.Message | None = None
 
         for folder in folders:
-            status, _ = mailbox.select(folder)
-            if status != "OK":
+            if folder in seen_folders:
+                continue
+            seen_folders.add(folder)
+
+            if not try_select_mailbox(mailbox, folder):
                 continue
 
             exact_message, folder_fallback, folder_subjects = find_in_selected_mailbox(
