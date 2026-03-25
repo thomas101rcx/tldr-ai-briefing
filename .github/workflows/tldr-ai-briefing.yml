@@ -3,8 +3,8 @@ name: TLDR AI Briefing
 on:
   workflow_dispatch:
   schedule:
-    # Weekdays only at 15:00 UTC.
-    # This is 7:00 AM PST in standard time and 8:00 AM PDT in daylight time.
+    # Weekdays only at 14:00 UTC.
+    # This is 6:00 AM PST in standard time and 7:00 AM PDT in daylight time.
     - cron: "0 14 * * 1-5"
 
 jobs:
