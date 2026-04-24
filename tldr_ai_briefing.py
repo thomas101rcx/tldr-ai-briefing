@@ -28,6 +28,14 @@ from pypdf import PdfReader
 IMAP_HOST = "imap.gmail.com"
 LA_TZ = ZoneInfo("America/Los_Angeles")
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)"
+DEFAULT_OPENROUTER_MODEL = "openrouter/free"
+OPENROUTER_FALLBACK_MODELS = (
+    "openrouter/free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "inclusionai/ling-2.6-flash:free",
+    "inclusionai/ling-2.6-1t:free",
+)
 
 
 @dataclass
@@ -350,7 +358,14 @@ def openrouter_request_json(
         json=payload,
         timeout=180,
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = response.text.strip()
+        raise requests.HTTPError(
+            f"{exc}. OpenRouter response body: {detail[:1000]}",
+            response=response,
+        ) from exc
     return response.json()
 
 
@@ -397,8 +412,7 @@ def summarize_articles(
 
     digest_input = "\n".join(combined_sections)
 
-    payload = {
-        "model": model,
+    base_payload = {
         "messages": [
             {
                 "role": "system",
@@ -424,16 +438,36 @@ def summarize_articles(
         "temperature": 0.2,
     }
 
-    response_json = openrouter_request_json(
-        api_key,
-        payload,
-        app_url=app_url,
-        app_name=app_name,
-    )
-    summary = extract_choice_text(response_json)
-    if not summary:
-        raise RuntimeError("OpenRouter summary response was empty")
-    return summary
+    candidate_models = [model]
+    candidate_models.extend(OPENROUTER_FALLBACK_MODELS)
+    candidate_models = list(dict.fromkeys(candidate_models))
+
+    errors: list[str] = []
+    for candidate_model in candidate_models:
+        payload = {**base_payload, "model": candidate_model}
+        try:
+            response_json = openrouter_request_json(
+                api_key,
+                payload,
+                app_url=app_url,
+                app_name=app_name,
+            )
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            errors.append(f"{candidate_model}: {exc}")
+            if status_code in {400, 404, 429, 502, 503, 504}:
+                logging.warning("OpenRouter model %s failed; trying fallback.", candidate_model)
+                continue
+            raise
+
+        summary = extract_choice_text(response_json)
+        if summary:
+            actual_model = response_json.get("model", candidate_model)
+            logging.info("OpenRouter summary generated with %s", actual_model)
+            return summary
+        errors.append(f"{candidate_model}: empty response")
+
+    raise RuntimeError("OpenRouter summary failed for all candidate models: " + " | ".join(errors))
 
 
 async def _save_edge_tts(text: str, voice: str, rate: str, output_path: Path) -> None:
@@ -521,7 +555,7 @@ def main() -> None:
 
     openrouter_model = optional_env(
         "OPENROUTER_MODEL",
-        "arcee-ai/trinity-large-preview:free",
+        DEFAULT_OPENROUTER_MODEL,
     )
     openrouter_app_url = os.getenv("OPENROUTER_APP_URL", "").strip() or None
     openrouter_app_name = os.getenv("OPENROUTER_APP_NAME", "").strip() or None

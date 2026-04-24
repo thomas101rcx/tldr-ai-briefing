@@ -21,7 +21,7 @@ export GMAIL_APP_PASSWORD="your-google-app-password"
 export OPENROUTER_API_KEY="your-openrouter-key"
 
 # Optional tuning
-export OPENROUTER_MODEL="arcee-ai/trinity-large-preview:free"
+export OPENROUTER_MODEL="openrouter/free"
 export TLDR_FROM_CONTAINS="tldr"
 export TLDR_SUBJECT_CONTAINS="tldr ai"
 export MAX_LINKS="80"
@@ -43,7 +43,7 @@ Add these repository secrets:
 - `OPENROUTER_API_KEY`
 
 Optional secrets (defaults are used if blank):
-- `OPENROUTER_MODEL` (default: `arcee-ai/trinity-large-preview:free`)
+- `OPENROUTER_MODEL` (default: `openrouter/free`)
 - `TLDR_FROM_CONTAINS` (default: `tldr`)
 - `TLDR_SUBJECT_CONTAINS` (default: `tldr ai`)
 
@@ -61,7 +61,7 @@ Do not use your regular Gmail password.
 
 - GitHub Actions cron is in UTC and runs Monday-Friday at `14:00 UTC`.
 - `14:00 UTC` maps to `6:00 AM PST` during standard time and `7:00 AM PDT` during daylight time.
-- Current default free model is `arcee-ai/trinity-large-preview:free` on OpenRouter.
+- Current default model is `openrouter/free`, which routes to an available free OpenRouter model.
 - If newsletter formatting changes, tune `TLDR_FROM_CONTAINS` and `TLDR_SUBJECT_CONTAINS`.
 - Some sites may block scraping or require JavaScript, which can reduce source coverage.
 - Weekend safety: if run manually on Saturday/Sunday and latest newsletter is from an earlier day, script skips regeneration by default (`SKIP_WEEKEND_STALE=true`).
