@@ -21,7 +21,7 @@ export GMAIL_APP_PASSWORD="your-google-app-password"
 export OPENROUTER_API_KEY="your-openrouter-key"
 
 # Optional tuning
-export OPENROUTER_MODEL="openrouter/free"
+export OPENROUTER_MODEL="openai/gpt-oss-20b:free"
 export TLDR_FROM_CONTAINS="tldr"
 export TLDR_SUBJECT_CONTAINS="tldr ai"
 export MAX_LINKS="80"
@@ -43,7 +43,7 @@ Add these repository secrets:
 - `OPENROUTER_API_KEY`
 
 Optional secrets (defaults are used if blank):
-- `OPENROUTER_MODEL` (default: `openrouter/free`)
+- `OPENROUTER_MODEL` (default: `openai/gpt-oss-20b:free`)
 - `TLDR_FROM_CONTAINS` (default: `tldr`)
 - `TLDR_SUBJECT_CONTAINS` (default: `tldr ai`)
 
@@ -61,7 +61,7 @@ Do not use your regular Gmail password.
 
 - GitHub Actions cron is in UTC and runs Monday-Friday at `14:00 UTC`.
 - `14:00 UTC` maps to `6:00 AM PST` during standard time and `7:00 AM PDT` during daylight time.
-- Current default model is `openrouter/free`, which routes to an available free OpenRouter model.
+- Current default model is `openai/gpt-oss-20b:free`, with current free OpenRouter fallbacks if the model is temporarily unavailable.
 - If newsletter formatting changes, tune `TLDR_FROM_CONTAINS` and `TLDR_SUBJECT_CONTAINS`.
 - Some sites may block scraping or require JavaScript, which can reduce source coverage.
 - Weekend safety: if run manually on Saturday/Sunday and latest newsletter is from an earlier day, script skips regeneration by default (`SKIP_WEEKEND_STALE=true`).

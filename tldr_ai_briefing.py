@@ -9,6 +9,7 @@ import imaplib
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email.header import decode_header
@@ -28,13 +29,14 @@ from pypdf import PdfReader
 IMAP_HOST = "imap.gmail.com"
 LA_TZ = ZoneInfo("America/Los_Angeles")
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)"
-DEFAULT_OPENROUTER_MODEL = "openrouter/free"
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
 OPENROUTER_FALLBACK_MODELS = (
-    "openrouter/free",
+    "openai/gpt-oss-20b:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemma-4-31b-it:free",
-    "google/gemma-4-26b-a4b-it:free",
-    "inclusionai/ling-2.6-flash:free",
-    "inclusionai/ling-2.6-1t:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openrouter/free",
 )
 
 
@@ -369,6 +371,36 @@ def openrouter_request_json(
     return response.json()
 
 
+def openrouter_error_payload(exc: requests.HTTPError) -> dict:
+    if exc.response is None:
+        return {}
+    try:
+        payload = exc.response.json()
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def is_openrouter_free_daily_quota_error(exc: requests.HTTPError) -> bool:
+    payload = openrouter_error_payload(exc)
+    error = payload.get("error", {})
+    message = str(error.get("message", "")).lower()
+    raw = str(error.get("metadata", {}).get("raw", "")).lower()
+    return "free-models-per-day" in message or "free-models-per-day" in raw
+
+
+def openrouter_retry_delay_seconds(exc: requests.HTTPError) -> float | None:
+    payload = openrouter_error_payload(exc)
+    metadata = payload.get("error", {}).get("metadata", {})
+    retry_after = metadata.get("retry_after_seconds") or metadata.get("retry_after_seconds_raw")
+    if retry_after is None and exc.response is not None:
+        retry_after = exc.response.headers.get("Retry-After")
+    try:
+        return float(retry_after)
+    except (TypeError, ValueError):
+        return None
+
+
 def extract_choice_text(response_json: dict) -> str:
     choices = response_json.get("choices", [])
     if not choices:
@@ -445,20 +477,43 @@ def summarize_articles(
     errors: list[str] = []
     for candidate_model in candidate_models:
         payload = {**base_payload, "model": candidate_model}
-        try:
-            response_json = openrouter_request_json(
-                api_key,
-                payload,
-                app_url=app_url,
-                app_name=app_name,
-            )
-        except requests.HTTPError as exc:
-            status_code = exc.response.status_code if exc.response is not None else None
-            errors.append(f"{candidate_model}: {exc}")
-            if status_code in {400, 404, 429, 502, 503, 504}:
-                logging.warning("OpenRouter model %s failed; trying fallback.", candidate_model)
-                continue
-            raise
+        response_json: dict | None = None
+        for attempt in range(2):
+            try:
+                response_json = openrouter_request_json(
+                    api_key,
+                    payload,
+                    app_url=app_url,
+                    app_name=app_name,
+                )
+                break
+            except requests.HTTPError as exc:
+                status_code = exc.response.status_code if exc.response is not None else None
+                if is_openrouter_free_daily_quota_error(exc):
+                    raise RuntimeError(
+                        "OpenRouter free daily quota is exhausted for this account. "
+                        "Wait for the daily reset or add OpenRouter credits to raise the free-model limit."
+                    ) from exc
+
+                retry_delay = openrouter_retry_delay_seconds(exc)
+                if status_code == 429 and attempt == 0 and retry_delay is not None and retry_delay <= 60:
+                    wait_seconds = retry_delay + 1
+                    logging.warning(
+                        "OpenRouter model %s is temporarily rate-limited; retrying in %.1f seconds.",
+                        candidate_model,
+                        wait_seconds,
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+
+                errors.append(f"{candidate_model}: {exc}")
+                if status_code in {400, 404, 429, 502, 503, 504}:
+                    logging.warning("OpenRouter model %s failed; trying fallback.", candidate_model)
+                    break
+                raise
+
+        if response_json is None:
+            continue
 
         summary = extract_choice_text(response_json)
         if summary:
