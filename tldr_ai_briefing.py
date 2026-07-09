@@ -47,6 +47,10 @@ class Article:
     text: str
 
 
+class OpenRouterDailyQuotaError(RuntimeError):
+    pass
+
+
 def require_env(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
@@ -490,7 +494,7 @@ def summarize_articles(
             except requests.HTTPError as exc:
                 status_code = exc.response.status_code if exc.response is not None else None
                 if is_openrouter_free_daily_quota_error(exc):
-                    raise RuntimeError(
+                    raise OpenRouterDailyQuotaError(
                         "OpenRouter free daily quota is exhausted for this account. "
                         "Wait for the daily reset or add OpenRouter credits to raise the free-model limit."
                     ) from exc
@@ -523,6 +527,41 @@ def summarize_articles(
         errors.append(f"{candidate_model}: empty response")
 
     raise RuntimeError("OpenRouter summary failed for all candidate models: " + " | ".join(errors))
+
+
+def build_fallback_summary(articles: list[Article], newsletter_date_slug: str) -> str:
+    sections = [
+        (
+            f"TLDR AI briefing for {newsletter_date_slug}. "
+            "OpenRouter free daily quota was exhausted, so this is an automated source digest."
+        ),
+        "",
+        "Top source highlights:",
+    ]
+
+    for idx, article in enumerate(articles[:12], start=1):
+        excerpt = article.text[:320].strip()
+        if len(article.text) > len(excerpt):
+            excerpt = excerpt.rstrip(". ") + "."
+        sections.extend(
+            [
+                "",
+                f"{idx}. {article.title}",
+                excerpt,
+                f"Source: {article.url}",
+            ]
+        )
+
+    sections.extend(
+        [
+            "",
+            "Takeaways:",
+            "- The newsletter was processed and source links were extracted successfully.",
+            "- The LLM summary was skipped because OpenRouter reported the free daily quota was exhausted.",
+            "- Rerun after the OpenRouter daily reset for a full model-generated briefing.",
+        ]
+    )
+    return "\n".join(sections)
 
 
 async def _save_edge_tts(text: str, voice: str, rate: str, output_path: Path) -> None:
@@ -649,14 +688,18 @@ def main() -> None:
         raise RuntimeError("Could not extract readable text from newsletter links")
 
     logging.info("Extracted readable content from %s links", len(articles))
-    summary_text = summarize_articles(
-        openrouter_api_key,
-        openrouter_model,
-        articles,
-        max_total_chars=max_total_chars,
-        app_url=openrouter_app_url,
-        app_name=openrouter_app_name,
-    )
+    try:
+        summary_text = summarize_articles(
+            openrouter_api_key,
+            openrouter_model,
+            articles,
+            max_total_chars=max_total_chars,
+            app_url=openrouter_app_url,
+            app_name=openrouter_app_name,
+        )
+    except OpenRouterDailyQuotaError as exc:
+        logging.warning("%s Generating fallback source digest.", exc)
+        summary_text = build_fallback_summary(articles, newsletter_date_slug)
 
     txt_path, md_path = write_outputs(output_root, summary_text, newsletter_date_slug)
 

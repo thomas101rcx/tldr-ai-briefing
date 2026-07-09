@@ -64,4 +64,5 @@ Do not use your regular Gmail password.
 - Current default model is `openai/gpt-oss-20b:free`, with current free OpenRouter fallbacks if the model is temporarily unavailable.
 - If newsletter formatting changes, tune `TLDR_FROM_CONTAINS` and `TLDR_SUBJECT_CONTAINS`.
 - Some sites may block scraping or require JavaScript, which can reduce source coverage.
+- If OpenRouter's free daily quota is exhausted, the workflow writes a basic source digest instead of failing.
 - Weekend safety: if run manually on Saturday/Sunday and latest newsletter is from an earlier day, script skips regeneration by default (`SKIP_WEEKEND_STALE=true`).
