@@ -30,6 +30,7 @@ IMAP_HOST = "imap.gmail.com"
 LA_TZ = ZoneInfo("America/Los_Angeles")
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
+MIN_NEWSLETTER_LINKS = 5
 OPENROUTER_FALLBACK_MODELS = (
     "openai/gpt-oss-20b:free",
     "qwen/qwen3-next-80b-a3b-instruct:free",
@@ -159,13 +160,18 @@ def extract_links(html_body: str, text_body: str) -> list[str]:
     return normalize_urls(links)
 
 
+def is_link_rich_newsletter(message: email.message.Message) -> bool:
+    html_body, text_body = get_message_bodies(message)
+    return len(extract_links(html_body, text_body)) >= MIN_NEWSLETTER_LINKS
+
+
 def fetch_tldr_message(
     gmail_address: str,
     gmail_app_password: str,
     from_contains: str,
     subject_contains: str,
     lookback_days: int,
-) -> email.message.Message:
+) -> email.message.Message | None:
     def discover_all_mail_folders(mailbox: imaplib.IMAP4_SSL) -> list[str]:
         status, payload = mailbox.list()
         if status != "OK" or not payload:
@@ -233,11 +239,13 @@ def fetch_tldr_message(
             if len(recent_subjects) > 8:
                 recent_subjects.pop(0)
 
-            if from_contains_l in sender:
-                if sender_fallback is None:
-                    sender_fallback = message
-                if not subject_contains_l or subject_contains_l in subject:
-                    return message, sender_fallback, recent_subjects
+            if from_contains_l not in sender or not is_link_rich_newsletter(message):
+                continue
+
+            if sender_fallback is None:
+                sender_fallback = message
+            if not subject_contains_l or subject_contains_l in subject:
+                return message, sender_fallback, recent_subjects
 
         return None, sender_fallback, recent_subjects
 
@@ -284,11 +292,12 @@ def fetch_tldr_message(
             return sender_fallback
 
         subject_preview = ", ".join(recent_subjects[-5:]) if recent_subjects else "none"
-        raise RuntimeError(
-            "Could not find a matching TLDR AI email. "
-            f"Adjust TLDR_FROM_CONTAINS / TLDR_SUBJECT_CONTAINS if needed. "
-            f"Recent subjects seen: {subject_preview}"
+        logging.info(
+            "No link-rich TLDR AI newsletter found in the last %s days. Recent subjects seen: %s",
+            lookback_days,
+            subject_preview,
         )
+        return None
 
 
 def fetch_url_text(url: str, timeout_seconds: int, max_chars_per_source: int) -> Article | None:
@@ -667,14 +676,16 @@ def main() -> None:
         subject_contains=subject_contains,
         lookback_days=lookback_days,
     )
+    if message is None:
+        logging.info("No eligible newsletter to process; skipping this run.")
+        return
+
     newsletter_date_slug = extract_newsletter_date_slug(message)
     if should_skip_for_weekend_stale(newsletter_date_slug, skip_weekend_stale):
         return
 
     html_body, text_body = get_message_bodies(message)
     links = extract_links(html_body, text_body)
-    if not links:
-        raise RuntimeError("No links found in the TLDR AI email")
 
     logging.info("Found %s links in newsletter", len(links))
 

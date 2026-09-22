@@ -43,3 +43,4 @@ jobs:
         with:
           name: tldr-ai-briefing-${{ github.run_id }}
           path: output/
+          if-no-files-found: ignore
