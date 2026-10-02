@@ -73,7 +73,10 @@ def decode_mime_header(raw_value: str | None) -> str:
     decoded: list[str] = []
     for content, charset in parts:
         if isinstance(content, bytes):
-            decoded.append(content.decode(charset or "utf-8", errors="replace"))
+            try:
+                decoded.append(content.decode(charset or "utf-8", errors="replace"))
+            except LookupError:
+                decoded.append(content.decode("utf-8", errors="replace"))
         else:
             decoded.append(content)
     return "".join(decoded)

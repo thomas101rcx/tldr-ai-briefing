@@ -1,7 +1,7 @@
 import email
 import unittest
 
-from tldr_ai_briefing import is_link_rich_newsletter
+from tldr_ai_briefing import decode_mime_header, is_link_rich_newsletter
 
 
 def make_message(link_count: int) -> email.message.Message:
@@ -17,6 +17,11 @@ def make_message(link_count: int) -> email.message.Message:
 
 
 class NewsletterSelectionTests(unittest.TestCase):
+    def test_unknown_header_charset_falls_back_to_utf8(self) -> None:
+        raw_header = "=?unknown-8bit?b?VExEUiBBSSBuZXdzbGV0dGVy?="
+
+        self.assertEqual(decode_mime_header(raw_header), "TLDR AI newsletter")
+
     def test_link_rich_message_is_eligible_newsletter(self) -> None:
         self.assertTrue(is_link_rich_newsletter(make_message(5)))
 
